@@ -7,8 +7,8 @@ const cors = require("cors");
 
 const app = express();
 app.use(cors({
-  origin: "https://senedjiguiya.vercel.app/", // ⚡ remplace par ton vrai domaine Vercel
-  methods: ["GET", "POST"],
+  origin: "https://senedjiguiya.vercel.app", // mets ton vrai domaine Vercel
+  methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
 app.use(express.json());
