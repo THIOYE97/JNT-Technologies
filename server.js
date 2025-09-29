@@ -29,7 +29,9 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
-
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
 // === PERMISSIONS ===
 async function hasPermission(role, permissionName) {
   const [rows] = await db.query(
