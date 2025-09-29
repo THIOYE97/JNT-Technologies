@@ -6,7 +6,11 @@ require("dotenv").config();
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: "https://senedjiguiya.vercel.app/", // ⚡ remplace par ton vrai domaine Vercel
+  methods: ["GET", "POST"],
+  credentials: true
+}));
 app.use(express.json());
 
 // === DB ===
