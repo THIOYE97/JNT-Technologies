@@ -51,6 +51,10 @@ function requirePermission(permissionName) {
   };
 }
 
+app.get("/", (req, res) => {
+  res.send("✅ Backend Railway OK");
+});
+
 // === REGISTER ===
 app.post("/register", authenticateToken, requirePermission("manage_users"), async (req, res) => {
   const { username, password, role } = req.body;
