@@ -2,12 +2,16 @@ const express = require("express");
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-require("dotenv").config();
 const cors = require("cors");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Charger dotenv uniquement en développement
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
 
 // === DB ===
 const db = mysql.createPool({
@@ -25,36 +29,18 @@ function authenticateToken(req, res, next) {
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: "Token invalide" });
-    req.user = user; // { id, role }
+    req.user = user;
     next();
   });
 }
-if (process.env.NODE_ENV !== "production") {
-  require("dotenv").config();
-}
-// === PERMISSIONS ===
-async function hasPermission(role, permissionName) {
-  const [rows] = await db.query(
-    `SELECT p.name 
-     FROM roles r
-     JOIN roles_permissions rp ON r.id = rp.role_id
-     JOIN permissions p ON p.id = rp.permission_id
-     WHERE r.name = ? AND p.name = ?`,
-    [role, permissionName]
-  );
-  return rows.length > 0;
-}
 
-function requirePermission(permissionName) {
-  return async (req, res, next) => {
-    const allowed = await hasPermission(req.user.role, permissionName);
-    if (!allowed) return res.status(403).json({ message: "Accès interdit" });
-    next();
-  };
-}
-
+// === ROUTES DE TEST ===
 app.get("/", (req, res) => {
   res.send("✅ Backend Railway OK");
+});
+
+app.get("/healthz", (req, res) => {
+  res.json({ ok: true, uptime: process.uptime() });
 });
 
 // === REGISTER ===
@@ -392,5 +378,6 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
 
 // === START ===
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`));
-
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Serveur lancé sur port ${PORT}`);
+});
