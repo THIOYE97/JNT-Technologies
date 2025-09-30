@@ -16,6 +16,18 @@ const db = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT   
+
+// Vérifier la connexion DB au démarrage
+(async () => {
+  try {
+    const conn = await db.getConnection();
+    console.log("✅ Connexion DB réussie !");
+    conn.release();
+  } catch (err) {
+    console.error("❌ Erreur connexion DB:", err.message);
+    process.exit(1); // forcer l’arrêt si DB inaccessible
+  }
+})();
 });
 
 
