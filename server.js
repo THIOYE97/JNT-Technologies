@@ -418,5 +418,7 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
 
 // === START ===
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Serveur lancé sur le port ${PORT}`);
+});
 
