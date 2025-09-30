@@ -10,12 +10,14 @@ app.use(cors());
 app.use(express.json());
 
 // === DB ===
+
 const db = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT   
+  port: process.env.DB_PORT
+});
 
 // Vérifier la connexion DB au démarrage
 (async () => {
@@ -25,10 +27,10 @@ const db = mysql.createPool({
     conn.release();
   } catch (err) {
     console.error("❌ Erreur connexion DB:", err.message);
-    process.exit(1); // forcer l’arrêt si DB inaccessible
+    process.exit(1); // Arrête le serveur si la DB est inaccessible
   }
 })();
-});
+
 
 
 // === AUTH MIDDLEWARE ===
