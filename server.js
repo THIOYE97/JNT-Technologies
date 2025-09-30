@@ -249,7 +249,6 @@ app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
 });
 
 // === AJOUTER UN CLIENT ===
-// === CREER CLIENT ===
 app.post("/clients", authenticateToken, async (req, res) => {
   try {
     const { ve_id, nom, prenom, telephone, montant } = req.body;
@@ -258,7 +257,7 @@ app.post("/clients", authenticateToken, async (req, res) => {
       return res.status(400).json({ message: "Champs manquants" });
     }
 
-    // Si l'utilisateur est VE/USER: il ne peut créer que pour son VE
+    // Si c’est un VE/USER → il ne peut créer que dans son propre VE
     if (req.user.role !== "ADMIN") {
       const [myVe] = await db.query(
         "SELECT id FROM ve WHERE user_id = ?",
@@ -269,7 +268,7 @@ app.post("/clients", authenticateToken, async (req, res) => {
       }
     }
 
-    // Récupérer le village du VE (source de vérité)
+    // Récupérer le village du VE (vérité)
     const [veRows] = await db.query(
       "SELECT id, village_id FROM ve WHERE id = ?",
       [ve_id]
@@ -279,7 +278,7 @@ app.post("/clients", authenticateToken, async (req, res) => {
     }
     const village_id = veRows[0].village_id;
 
-    // Créer le client
+    // Création du client
     const client_code = `CL-${ve_id}-${Date.now()}`;
     const [insert] = await db.query(
       `INSERT INTO clients (client_code, nom, prenom, ve_id, village_id, date_inscription, telephone)
@@ -301,6 +300,7 @@ app.post("/clients", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
 
 // === CLIENT DETAILS ===
 app.get("/clients/:id", authenticateToken, async (req, res) => {
