@@ -189,20 +189,16 @@ app.get("/ve/:id", authenticateToken, async (req, res) => {
        FROM ve v
        LEFT JOIN villages vil ON vil.id = v.village_id
        WHERE v.id = ?`,
-      [requestedId]  // ✅ correction ici
+      [requestedId]   // 👈 ici
     );
-
     if (rows.length === 0) return res.status(404).json({ message: "VE introuvable" });
-
-    // Vérification d’accès
-    if (user.role === "VE" && user.ve_id !== requestedId) {
-      return res.status(403).send("Accès interdit");
-    }
-
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
+    if (user.role === "VE" && user.ve_id !== requestedId) {
+      return res.status(403).send("Accès interdit");
+    }
   }
 });
 
