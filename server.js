@@ -1,8 +1,8 @@
 const express = require("express");
+require("dotenv").config(); // 👈 doit être au tout début
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-require("dotenv").config();
 const cors = require("cors");
 
 const app = express();
@@ -417,8 +417,9 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
 
 
 // === START ===
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5000; // local = 5000, Railway injecte PORT
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Serveur lancé sur le port ${PORT}`);
 });
+
 
