@@ -80,16 +80,19 @@ app.post("/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(400).json({ message: "Mot de passe incorrect" });
 
-    // Chercher ve_id si role = VE
+    // Chercher ve_id et village_id
     let ve_id = null;
+    let village_id = null;
     if (user.role === "VE") {
-      const [veRows] = await db.query("SELECT id FROM ve WHERE user_id = ?", [user.id]);
-      if (veRows.length > 0) ve_id = veRows[0].id;
+      const [veRows] = await db.query("SELECT id, village_id FROM ve WHERE user_id = ?", [user.id]);
+      if (veRows.length > 0) {
+        ve_id = veRows[0].id;
+        village_id = veRows[0].village_id;
+      }
     }
 
-    // 👉 On met ve_id dans le JWT
     const token = jwt.sign(
-      { id: user.id, role: user.role, ve_id }, // ✅ ajouté
+      { id: user.id, role: user.role, ve_id, village_id },
       process.env.JWT_SECRET,
       { expiresIn: "2h" }
     );
@@ -100,7 +103,8 @@ app.post("/login", async (req, res) => {
         id: user.id,
         username: user.username,
         role: user.role,
-        ve_id
+        ve_id,
+        village_id
       }
     });
   } catch (error) {
@@ -202,37 +206,44 @@ app.get("/ve/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// === CLIENTS ===
+// === CLIENTS D’UN VE OU DU VILLAGE ===
 app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
   const { ve_id } = req.params;
-  try {
-    if (req.user.role === "USER" || req.user.role === "VE") {
-      const [veCheck] = await db.query(
-        "SELECT id FROM ve WHERE id = ? AND user_id = ?",
-        [ve_id, req.user.id]
-      );
-      if (veCheck.length === 0)
-        return res.status(403).json({ message: "Accès interdit" });
-    }
 
-    // 👉 ADMIN voit tout sans restriction
-    const [rows] = await db.query(`
-      SELECT 
-  c.id, 
-  c.client_code, 
-  c.nom, 
-  c.prenom, 
-  c.telephone,
-  v.nom_village, 
-  DATE(c.date_inscription) AS date_inscription,  -- 👈 pareil ici
-  SUM(p.montant) AS total_paiements
-FROM clients c
-LEFT JOIN villages v ON c.village_id = v.id
-LEFT JOIN paiements p ON c.id = p.client_id
-WHERE c.ve_id = ?
-GROUP BY c.id, c.client_code, c.nom, c.prenom, c.telephone, v.nom_village, c.date_inscription
-ORDER BY c.date_inscription DESC;
-    `, [ve_id]);
+  try {
+    let rows;
+
+    if (req.user.role === "ADMIN") {
+      // ADMIN : tous les clients du VE demandé
+      [rows] = await db.query(`
+        SELECT c.id, c.client_code, c.nom, c.prenom, c.telephone,
+               v.nom_village, DATE(c.date_inscription) AS date_inscription,
+               IFNULL(SUM(p.montant),0) AS total_paiements
+        FROM clients c
+        LEFT JOIN villages v ON c.village_id = v.id
+        LEFT JOIN paiements p ON c.id = p.client_id
+        WHERE c.ve_id = ?
+        GROUP BY c.id, c.client_code, c.nom, c.prenom, c.telephone, v.nom_village, c.date_inscription
+        ORDER BY c.date_inscription DESC
+      `, [ve_id]);
+    } 
+    else if (req.user.role === "VE") {
+      // VE : tous les clients de SON VILLAGE
+      [rows] = await db.query(`
+        SELECT c.id, c.client_code, c.nom, c.prenom, c.telephone,
+               v.nom_village, DATE(c.date_inscription) AS date_inscription,
+               IFNULL(SUM(p.montant),0) AS total_paiements
+        FROM clients c
+        LEFT JOIN villages v ON c.village_id = v.id
+        LEFT JOIN paiements p ON c.id = p.client_id
+        WHERE c.village_id = ?
+        GROUP BY c.id, c.client_code, c.nom, c.prenom, c.telephone, v.nom_village, c.date_inscription
+        ORDER BY c.date_inscription DESC
+      `, [req.user.village_id]);
+    } 
+    else {
+      return res.status(403).json({ message: "Accès interdit" });
+    }
 
     res.json(rows);
   } catch (error) {
@@ -240,6 +251,7 @@ ORDER BY c.date_inscription DESC;
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
 // === AJOUTER UN CLIENT ===
 // === CREER CLIENT ===
 app.post("/clients", authenticateToken, async (req, res) => {
@@ -330,10 +342,12 @@ app.get("/clients/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// === PAIEMENTS ===
-app.post("/paiements", authenticateToken, requirePermission("manage_paiements"), async (req, res) => {
+// === AJOUTER UN PAIEMENT ===
+app.post("/paiements", authenticateToken, async (req, res) => {
   const { client_id, montant, password } = req.body;
+
   try {
+    // Vérif mot de passe utilisateur
     const [rows] = await db.query("SELECT * FROM users WHERE id = ?", [req.user.id]);
     if (rows.length === 0) return res.status(400).json({ message: "Utilisateur introuvable" });
 
@@ -341,10 +355,23 @@ app.post("/paiements", authenticateToken, requirePermission("manage_paiements"),
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(400).json({ message: "Mot de passe incorrect" });
 
+    // Vérif que le client est bien dans le village du VE
+    if (req.user.role === "VE") {
+      const [check] = await db.query(
+        "SELECT c.id FROM clients c WHERE c.id = ? AND c.village_id = ?",
+        [client_id, req.user.village_id]
+      );
+      if (check.length === 0) {
+        return res.status(403).json({ message: "Accès interdit" });
+      }
+    }
+
+    // Enregistrer paiement
     await db.query(
       "INSERT INTO paiements (client_id, montant, date_paiement, user_id) VALUES (?, ?, NOW(), ?)",
       [client_id, montant, req.user.id]
     );
+
     res.json({ message: "Paiement enregistré avec succès" });
   } catch (error) {
     console.error(error);
