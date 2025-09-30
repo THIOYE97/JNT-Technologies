@@ -6,11 +6,7 @@ require("dotenv").config();
 const cors = require("cors");
 
 const app = express();
-app.use(cors({
-  origin: "https://senedjiguiya.vercel.app", // mets ton vrai domaine Vercel
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
 // === DB ===
@@ -55,10 +51,6 @@ function requirePermission(permissionName) {
   };
 }
 
-app.get("/", (req, res) => {
-  res.send("✅ Backend Railway OK");
-});
-
 // === REGISTER ===
 app.post("/register", authenticateToken, requirePermission("manage_users"), async (req, res) => {
   const { username, password, role } = req.body;
@@ -95,7 +87,12 @@ app.post("/login", async (req, res) => {
       if (veRows.length > 0) ve_id = veRows[0].id;
     }
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "2h" });
+    // 👉 On met ve_id dans le JWT
+    const token = jwt.sign(
+      { id: user.id, role: user.role, ve_id }, // ✅ ajouté
+      process.env.JWT_SECRET,
+      { expiresIn: "2h" }
+    );
 
     res.json({
       token,
@@ -115,16 +112,12 @@ app.post("/login", async (req, res) => {
 // === ME ===
 app.get("/me", authenticateToken, async (req, res) => {
   try {
-    const [rows] = await db.query(
-      "SELECT id, username, role FROM users WHERE id = ?", 
-      [req.user.id] // ✅ correction ici
-    );
-
+    const [rows] = await db.query("SELECT id, username, role FROM users WHERE id = ?", [req.user.id]);
     if (rows.length === 0) return res.status(404).json({ message: "Utilisateur introuvable" });
 
     const user = rows[0];
-    let ve_id = null;
 
+    let ve_id = null;
     if (user.role === "VE") {
       const [veRows] = await db.query("SELECT id FROM ve WHERE user_id = ?", [user.id]);
       if (veRows.length > 0) ve_id = veRows[0].id;
@@ -136,6 +129,7 @@ app.get("/me", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
 // === VE ===
 app.get("/ve", authenticateToken, async (req, res) => {
   try {
@@ -183,7 +177,7 @@ app.get("/ve", authenticateToken, async (req, res) => {
 // === VE DETAILS ===
 app.get("/ve/:id", authenticateToken, async (req, res) => {
   const requestedId = parseInt(req.params.id);
-   const user = req.user;
+  const user = req.user;
   try {
     const [rows] = await db.query(
       `SELECT v.id, v.ve_code, v.nom, v.prenom, v.village_id,
@@ -191,16 +185,20 @@ app.get("/ve/:id", authenticateToken, async (req, res) => {
        FROM ve v
        LEFT JOIN villages vil ON vil.id = v.village_id
        WHERE v.id = ?`,
-      [id]
+      [requestedId]  // ✅ correction ici
     );
+
     if (rows.length === 0) return res.status(404).json({ message: "VE introuvable" });
+
+    // Vérification d’accès
+    if (user.role === "VE" && user.ve_id !== requestedId) {
+      return res.status(403).send("Accès interdit");
+    }
+
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
-     if (user.role === "VE" && user.ve_id !== requestedId) {
-    return res.status(403).send("Accès interdit");
-  }
   }
 });
 
@@ -397,6 +395,5 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
 
 // === START ===
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Serveur lancé sur port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`));
+
