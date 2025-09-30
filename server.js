@@ -9,11 +9,7 @@ const app = express();
 app.use(express.json());
 
 app.use(cors({
-  origin: [
-    "http://localhost:3000",          // dev
-    "https://senedjiguiya.vercel.app" // prod
-  ],
-  credentials: true
+ origin: "*"
 }));
 
 // === DB ===
