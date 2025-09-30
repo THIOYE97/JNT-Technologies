@@ -115,12 +115,16 @@ app.post("/login", async (req, res) => {
 // === ME ===
 app.get("/me", authenticateToken, async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT id, username, role FROM users WHERE id = ?", [req.user.id]);
+    const [rows] = await db.query(
+      "SELECT id, username, role FROM users WHERE id = ?", 
+      [req.user.id] // ✅ correction ici
+    );
+
     if (rows.length === 0) return res.status(404).json({ message: "Utilisateur introuvable" });
 
     const user = rows[0];
-
     let ve_id = null;
+
     if (user.role === "VE") {
       const [veRows] = await db.query("SELECT id FROM ve WHERE user_id = ?", [user.id]);
       if (veRows.length > 0) ve_id = veRows[0].id;
@@ -132,7 +136,6 @@ app.get("/me", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-
 // === VE ===
 app.get("/ve", authenticateToken, async (req, res) => {
   try {
