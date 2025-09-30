@@ -1,5 +1,5 @@
 const express = require("express");
-require("dotenv").config(); // 👈 doit être au tout début
+require("dotenv").config(); // 👈 au tout début
 const mysql = require("mysql2/promise");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -7,17 +7,14 @@ const cors = require("cors");
 
 const app = express();
 app.use(express.json());
-import cors from "cors";
 
 app.use(cors({
   origin: [
-    "http://localhost:3000",
-    "https://senedjiguiya.vercel.app"
+    "http://localhost:3000",          // dev
+    "https://senedjiguiya.vercel.app" // prod
   ],
   credentials: true
 }));
-
-
 
 // === DB ===
 
