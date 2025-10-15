@@ -406,7 +406,10 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-
+// === ROUTE DE TEST / ===
+app.get("/", (req, res) => {
+  res.send("✅ API Senedjiguiya en ligne !");
+});
 // === START ===
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Serveur lancé sur le port ${PORT}`));
