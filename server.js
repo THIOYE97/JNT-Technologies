@@ -215,6 +215,51 @@ app.get("/ve/:id", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+// === AJOUTER UN CLIENT ===
+app.post("/clients", authenticateToken, async (req, res) => {
+  try {
+    const { ve_id, nom, prenom, telephone, montant } = req.body;
+    if (!ve_id || !nom || !prenom || !telephone)
+      return res.status(400).json({ message: "Champs manquants" });
+
+    // Vérification VE
+    if (req.user.role !== "ADMIN") {
+      const checkVe = await db.query("SELECT id FROM ve WHERE user_id = $1", [req.user.id]);
+      if (checkVe.rows.length === 0 || checkVe.rows[0].id !== Number(ve_id))
+        return res.status(403).json({ message: "Accès interdit" });
+    }
+
+    const veRes = await db.query("SELECT village_id FROM ve WHERE id = $1", [ve_id]);
+    if (veRes.rows.length === 0)
+      return res.status(400).json({ message: "VE introuvable" });
+
+    const village_id = veRes.rows[0].village_id;
+    const client_code = `CL-${ve_id}-${Date.now()}`;
+
+    const insert = await db.query(
+      `INSERT INTO clients (client_code, nom, prenom, ve_id, village_id, date_inscription, telephone)
+       VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id`,
+      [client_code, nom, prenom, ve_id, village_id, telephone]
+    );
+
+    const client_id = insert.rows[0].id;
+
+    // === Si un montant initial est fourni, créer un premier paiement avec un reçu auto-généré ===
+    if (montant && Number(montant) > 0) {
+      const numero_recu = `RCP-${new Date().getFullYear()}${String(Date.now()).slice(-6)}`;
+      await db.query(
+        `INSERT INTO paiements (client_id, montant, date_paiement, user_id, numero_recu)
+         VALUES ($1, $2, NOW(), $3, $4)`,
+        [client_id, montant, req.user.id, numero_recu]
+      );
+    }
+
+    res.json({ message: "Client créé", client_id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
 
 // === CLIENTS D’UN VE OU D’UN VILLAGE ===
 app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
@@ -263,49 +308,46 @@ app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
   }
 });
 
-// === AJOUTER UN CLIENT ===
-app.post("/clients", authenticateToken, async (req, res) => {
+// === HISTORIQUE DES PAIEMENTS D’UN CLIENT ===
+app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
+  const { client_id } = req.params;
   try {
-    const { ve_id, nom, prenom, telephone, montant } = req.body;
-    if (!ve_id || !nom || !prenom || !telephone)
-      return res.status(400).json({ message: "Champs manquants" });
-
-    // Vérification VE
+    // Vérification des droits
     if (req.user.role !== "ADMIN") {
-      const checkVe = await db.query("SELECT id FROM ve WHERE user_id = $1", [req.user.id]);
-      if (checkVe.rows.length === 0 || checkVe.rows[0].id !== Number(ve_id))
+      const check = await db.query(
+        `SELECT c.id
+         FROM clients c
+         JOIN ve ON c.ve_id = ve.id
+         WHERE c.id = $1 AND ve.user_id = $2`,
+        [client_id, req.user.id]
+      );
+      if (check.rows.length === 0)
         return res.status(403).json({ message: "Accès interdit" });
     }
 
-    const veRes = await db.query("SELECT village_id FROM ve WHERE id = $1", [ve_id]);
-    if (veRes.rows.length === 0)
-      return res.status(400).json({ message: "VE introuvable" });
-
-    const village_id = veRes.rows[0].village_id;
-    const client_code = `CL-${ve_id}-${Date.now()}`;
-
-    const insert = await db.query(
-      `INSERT INTO clients (client_code, nom, prenom, ve_id, village_id, date_inscription, telephone)
-       VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id`,
-      [client_code, nom, prenom, ve_id, village_id, telephone]
+    const result = await db.query(
+      `
+      SELECT 
+        p.id AS paiement_id,
+        p.numero_recu,
+        p.montant,
+        p.date_paiement,
+        u.username AS payeur_username
+      FROM paiements p
+      JOIN clients c ON p.client_id = c.id
+      LEFT JOIN users u ON p.user_id = u.id
+      WHERE p.client_id = $1
+      ORDER BY p.date_paiement DESC
+      `,
+      [client_id]
     );
 
-    const client_id = insert.rows[0].id;
-
-    if (montant && Number(montant) > 0) {
-      await db.query(
-        "INSERT INTO paiements (client_id, montant, date_paiement, user_id) VALUES ($1, $2, NOW(), $3)",
-        [client_id, montant, req.user.id]
-      );
-    }
-
-    res.json({ message: "Client créé", client_id });
-  } catch (err) {
-    console.error(err);
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-
 // === CLIENT DETAILS ===
 app.get("/clients/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -333,11 +375,14 @@ app.get("/clients/:id", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-
 // === AJOUTER UN PAIEMENT ===
 app.post("/paiements", authenticateToken, async (req, res) => {
-  const { client_id, montant, password } = req.body;
+  const { client_id, montant, password, numero_recu } = req.body;
+
   try {
+    if (!numero_recu || numero_recu.trim() === "")
+      return res.status(400).json({ message: "Le numéro de reçu est obligatoire." });
+
     const userRes = await db.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
     if (userRes.rows.length === 0)
       return res.status(400).json({ message: "Utilisateur introuvable" });
@@ -346,31 +391,49 @@ app.post("/paiements", authenticateToken, async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(400).json({ message: "Mot de passe incorrect" });
 
+    // Vérification VE
     if (req.user.role === "VE") {
       const check = await db.query(
-        "SELECT id FROM clients WHERE id = $1 AND village_id = $2",
-        [client_id, req.user.village_id]
+        `SELECT c.id
+         FROM clients c
+         JOIN ve ON c.ve_id = ve.id
+         WHERE c.id = $1 AND ve.user_id = $2`,
+        [client_id, req.user.id]
       );
       if (check.rows.length === 0)
         return res.status(403).json({ message: "Accès interdit" });
     }
 
+   // Vérifier si le reçu existe déjà avec le même montant
+const recuCheck = await db.query(
+  "SELECT id FROM paiements WHERE numero_recu = $1 AND montant = $2",
+  [numero_recu, montant]
+);
+
+if (recuCheck.rows.length > 0) {
+  return res.status(400).json({
+    message: "Ce numéro de reçu existe déjà pour ce montant.",
+  });
+}
+
+    // Enregistrer le paiement
     await db.query(
-      "INSERT INTO paiements (client_id, montant, date_paiement, user_id) VALUES ($1, $2, NOW(), $3)",
-      [client_id, montant, req.user.id]
+      `INSERT INTO paiements (client_id, montant, date_paiement, user_id, numero_recu)
+       VALUES ($1, $2, NOW(), $3, $4)`,
+      [client_id, montant, req.user.id, numero_recu]
     );
 
-    res.json({ message: "Paiement enregistré avec succès" });
+    res.json({ message: "Paiement enregistré avec succès", numero_recu });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-
-// === HISTORIQUE DES PAIEMENTS D’UN CLIENT ===
+// === HISTORIQUE DES PAIEMENTS D’UN CLIENT
 app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
   const { client_id } = req.params;
   try {
+    // Vérification des droits
     if (req.user.role !== "ADMIN") {
       const check = await db.query(
         `SELECT c.id
@@ -385,16 +448,16 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
 
     const result = await db.query(
       `
-      SELECT c.client_code, c.nom AS client_nom, c.prenom AS client_prenom,
-             v.nom_village, ve.ve_code,
-             p.id AS paiement_id, p.montant, p.date_paiement,
-             u.username AS payeur_username
-      FROM clients c
-      LEFT JOIN paiements p ON c.id = p.client_id
-      LEFT JOIN villages v ON c.village_id = v.id
-      LEFT JOIN ve ON c.ve_id = ve.id
+      SELECT 
+        p.id AS paiement_id,
+        p.numero_recu,
+        p.montant,
+        p.date_paiement,
+        u.username AS payeur_username
+      FROM paiements p
+      JOIN clients c ON p.client_id = c.id
       LEFT JOIN users u ON p.user_id = u.id
-      WHERE c.id = $1
+      WHERE p.client_id = $1
       ORDER BY p.date_paiement DESC
       `,
       [client_id]
