@@ -113,7 +113,7 @@ app.post("/login", async (req, res) => {
     const token = jwt.sign(
       { id: user.id, role: user.role, ve_id, village_id },
       process.env.JWT_SECRET,
-      { expiresIn: "2h" }
+      { expiresIn: "30d" }
     );
 
     res.json({
@@ -218,17 +218,20 @@ app.get("/ve/:id", authenticateToken, async (req, res) => {
 // === AJOUTER UN CLIENT ===
 app.post("/clients", authenticateToken, async (req, res) => {
   try {
-    const { ve_id, nom, prenom, telephone, montant, numero_recu } = req.body;
+    const { ve_id, nom, prenom, telephone, montant, numero_recu, paquet_id } = req.body;
+
+    // Vérifications des champs obligatoires
     if (!ve_id || !nom || !prenom || !telephone)
       return res.status(400).json({ message: "Champs manquants" });
 
-    // Vérification VE
+    // Vérification VE (si l'utilisateur n'est pas admin)
     if (req.user.role !== "ADMIN") {
       const checkVe = await db.query("SELECT id FROM ve WHERE user_id = $1", [req.user.id]);
       if (checkVe.rows.length === 0 || checkVe.rows[0].id !== Number(ve_id))
         return res.status(403).json({ message: "Accès interdit" });
     }
 
+    // Récupération du village du VE
     const veRes = await db.query("SELECT village_id FROM ve WHERE id = $1", [ve_id]);
     if (veRes.rows.length === 0)
       return res.status(400).json({ message: "VE introuvable" });
@@ -236,31 +239,36 @@ app.post("/clients", authenticateToken, async (req, res) => {
     const village_id = veRes.rows[0].village_id;
     const client_code = `CL-${ve_id}-${Date.now()}`;
 
-    // Création du client
+    // ✅ Création du client (avec paquet_id inclus)
     const insert = await db.query(
-      `INSERT INTO clients (client_code, nom, prenom, ve_id, village_id, date_inscription, telephone)
-       VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id`,
-      [client_code, nom, prenom, ve_id, village_id, telephone]
+      `INSERT INTO clients (client_code, nom, prenom, ve_id, village_id, date_inscription, telephone, paquet_id)
+       VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+       RETURNING id`,
+      [client_code, nom, prenom, ve_id, village_id, telephone, paquet_id || null]
     );
 
     const client_id = insert.rows[0].id;
 
-    // 🧾 Si un montant est saisi, le numéro de reçu devient OBLIGATOIRE
+    // 🧾 Si un montant est saisi, le numéro de reçu devient obligatoire
     if (montant && Number(montant) > 0) {
       if (!numero_recu || numero_recu.trim() === "") {
-        return res.status(400).json({ message: "Le numéro de reçu est obligatoire pour un paiement initial." });
+        return res.status(400).json({
+          message: "Le numéro de reçu est obligatoire pour un paiement initial."
+        });
       }
 
-      // Vérifie unicité (même reçu + même montant interdit)
+      // Vérifie unicité du numéro de reçu + montant
       const recuCheck = await db.query(
         "SELECT id FROM paiements WHERE numero_recu = $1 AND montant = $2",
         [numero_recu.trim(), montant]
       );
       if (recuCheck.rows.length > 0) {
-        return res.status(400).json({ message: "Ce numéro de reçu existe déjà pour ce montant." });
+        return res.status(400).json({
+          message: "Ce numéro de reçu existe déjà pour ce montant."
+        });
       }
 
-      // Enregistrement du paiement
+      // 💰 Enregistrement du paiement initial
       await db.query(
         `INSERT INTO paiements (client_id, montant, date_paiement, user_id, numero_recu)
          VALUES ($1, $2, NOW(), $3, $4)`,
@@ -268,13 +276,12 @@ app.post("/clients", authenticateToken, async (req, res) => {
       );
     }
 
-    res.json({ message: "Client créé avec succès", client_id });
+    res.json({ message: "✅ Client créé avec succès", client_id });
   } catch (err) {
-    console.error(err);
+    console.error("Erreur POST /clients:", err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
-
 
 // === CLIENTS D’UN VE OU D’UN VILLAGE ===
 app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
@@ -369,13 +376,19 @@ app.get("/clients/:id", authenticateToken, async (req, res) => {
   try {
     const result = await db.query(
       `
-      SELECT c.id, c.client_code, c.nom, c.prenom,
-             DATE(c.date_inscription) AS date_inscription,
-             c.telephone, v.nom_village, ve.ve_code,
-             ve.nom AS ve_nom, ve.prenom AS ve_prenom
+      SELECT 
+        c.id, c.client_code, c.nom, c.prenom,
+        DATE(c.date_inscription) AS date_inscription,
+        c.telephone, v.nom_village, 
+        ve.ve_code, ve.nom AS ve_nom, ve.prenom AS ve_prenom,
+        p.culture AS paquet_culture,
+        p.superficie AS paquet_superficie,
+        p.prix_fcfa AS paquet_prix,
+        p.composition AS paquet_composition
       FROM clients c
       LEFT JOIN villages v ON c.village_id = v.id
       LEFT JOIN ve ON c.ve_id = ve.id
+      LEFT JOIN paquets p ON c.paquet_id = p.id
       WHERE c.id = $1
       `,
       [id]
@@ -390,6 +403,7 @@ app.get("/clients/:id", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
 // === AJOUTER UN PAIEMENT ===
 app.post("/paiements", authenticateToken, async (req, res) => {
   const { client_id, montant, password, numero_recu } = req.body;
@@ -484,6 +498,18 @@ app.get("/paiements/client/:client_id", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
+// === GET TOUS LES PAQUETS ===
+app.get("/paquets", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query("SELECT * FROM paquets ORDER BY culture, superficie");
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
 // === ROUTE DE TEST / ===
 app.get("/", (req, res) => {
   res.send("✅ API Senedjiguiya en ligne !");
