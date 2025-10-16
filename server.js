@@ -289,34 +289,51 @@ app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
   try {
     let result;
 
+    // ADMIN → voit tous les clients du VE
     if (req.user.role === "ADMIN") {
       result = await db.query(
         `
-        SELECT c.id, c.client_code, c.nom, c.prenom, c.telephone,
-               v.nom_village, DATE(c.date_inscription) AS date_inscription,
-               COALESCE(SUM(p.montant),0) AS total_paiements
+        SELECT 
+          c.id, c.client_code, c.nom, c.prenom, c.telephone,
+          v.nom_village, DATE(c.date_inscription) AS date_inscription,
+          COALESCE(SUM(pai.montant), 0) AS total_paiements,
+          paq.culture AS paquet_culture,
+          paq.superficie AS paquet_superficie,
+          paq.prix_fcfa AS paquet_prix,
+          paq.composition AS paquet_composition
         FROM clients c
         LEFT JOIN villages v ON c.village_id = v.id
-        LEFT JOIN paiements p ON c.id = p.client_id
+        LEFT JOIN paiements pai ON c.id = pai.client_id
+        LEFT JOIN paquets paq ON c.paquet_id = paq.id
         WHERE c.ve_id = $1
-        GROUP BY c.id, v.nom_village
+        GROUP BY 
+          c.id, v.nom_village, paq.culture, paq.superficie, paq.prix_fcfa, paq.composition
         ORDER BY c.date_inscription DESC
-      `,
+        `,
         [ve_id]
       );
+
+    // VE → ne voit que ses clients de son propre village
     } else if (req.user.role === "VE") {
       result = await db.query(
         `
-        SELECT c.id, c.client_code, c.nom, c.prenom, c.telephone,
-               v.nom_village, DATE(c.date_inscription) AS date_inscription,
-               COALESCE(SUM(p.montant),0) AS total_paiements
+        SELECT 
+          c.id, c.client_code, c.nom, c.prenom, c.telephone,
+          v.nom_village, DATE(c.date_inscription) AS date_inscription,
+          COALESCE(SUM(pai.montant), 0) AS total_paiements,
+          paq.culture AS paquet_culture,
+          paq.superficie AS paquet_superficie,
+          paq.prix_fcfa AS paquet_prix,
+          paq.composition AS paquet_composition
         FROM clients c
         LEFT JOIN villages v ON c.village_id = v.id
-        LEFT JOIN paiements p ON c.id = p.client_id
+        LEFT JOIN paiements pai ON c.id = pai.client_id
+        LEFT JOIN paquets paq ON c.paquet_id = paq.id
         WHERE c.village_id = $1
-        GROUP BY c.id, v.nom_village
+        GROUP BY 
+          c.id, v.nom_village, paq.culture, paq.superficie, paq.prix_fcfa, paq.composition
         ORDER BY c.date_inscription DESC
-      `,
+        `,
         [req.user.village_id]
       );
     } else {
@@ -325,7 +342,7 @@ app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
 
     res.json(result.rows);
   } catch (error) {
-    console.error(error);
+    console.error("Erreur SQL:", error);
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
