@@ -383,6 +383,7 @@ app.get("/clients/:id", authenticateToken, async (req, res) => {
         ve.ve_code, ve.nom AS ve_nom, ve.prenom AS ve_prenom,
         p.culture AS paquet_culture,
         p.superficie AS paquet_superficie,
+        p.photo_url AS paquet_photo_url,
         p.prix_fcfa AS paquet_prix,
         p.composition AS paquet_composition
       FROM clients c
