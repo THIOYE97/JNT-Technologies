@@ -218,7 +218,7 @@ app.get("/ve/:id", authenticateToken, async (req, res) => {
 // === AJOUTER UN CLIENT ===
 app.post("/clients", authenticateToken, async (req, res) => {
   try {
-    const { ve_id, nom, prenom, telephone, montant } = req.body;
+    const { ve_id, nom, prenom, telephone, montant, numero_recu } = req.body;
     if (!ve_id || !nom || !prenom || !telephone)
       return res.status(400).json({ message: "Champs manquants" });
 
@@ -236,6 +236,7 @@ app.post("/clients", authenticateToken, async (req, res) => {
     const village_id = veRes.rows[0].village_id;
     const client_code = `CL-${ve_id}-${Date.now()}`;
 
+    // Création du client
     const insert = await db.query(
       `INSERT INTO clients (client_code, nom, prenom, ve_id, village_id, date_inscription, telephone)
        VALUES ($1, $2, $3, $4, $5, NOW(), $6) RETURNING id`,
@@ -244,22 +245,36 @@ app.post("/clients", authenticateToken, async (req, res) => {
 
     const client_id = insert.rows[0].id;
 
-    // === Si un montant initial est fourni, créer un premier paiement avec un reçu auto-généré ===
+    // 🧾 Si un montant est saisi, le numéro de reçu devient OBLIGATOIRE
     if (montant && Number(montant) > 0) {
-      const numero_recu = `RCP-${new Date().getFullYear()}${String(Date.now()).slice(-6)}`;
+      if (!numero_recu || numero_recu.trim() === "") {
+        return res.status(400).json({ message: "Le numéro de reçu est obligatoire pour un paiement initial." });
+      }
+
+      // Vérifie unicité (même reçu + même montant interdit)
+      const recuCheck = await db.query(
+        "SELECT id FROM paiements WHERE numero_recu = $1 AND montant = $2",
+        [numero_recu.trim(), montant]
+      );
+      if (recuCheck.rows.length > 0) {
+        return res.status(400).json({ message: "Ce numéro de reçu existe déjà pour ce montant." });
+      }
+
+      // Enregistrement du paiement
       await db.query(
         `INSERT INTO paiements (client_id, montant, date_paiement, user_id, numero_recu)
          VALUES ($1, $2, NOW(), $3, $4)`,
-        [client_id, montant, req.user.id, numero_recu]
+        [client_id, montant, req.user.id, numero_recu.trim()]
       );
     }
 
-    res.json({ message: "Client créé", client_id });
+    res.json({ message: "Client créé avec succès", client_id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 });
+
 
 // === CLIENTS D’UN VE OU D’UN VILLAGE ===
 app.get("/clients/ve/:ve_id", authenticateToken, async (req, res) => {
