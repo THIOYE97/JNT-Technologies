@@ -153,12 +153,14 @@ app.get("/ve", authenticateToken, async (req, res) => {
                vil.nom_village,
                u.username AS user_account,
                COUNT(DISTINCT c.id) AS nb_inscrits,
-               COALESCE(SUM(p.montant), 0) AS total_paiements
+               COALESCE(SUM(p.montant), 0) AS total_paiements,
+               COALESCE(SUM(paq.prix_fcfa), 0) AS total_valeur_paquets
         FROM ve
         LEFT JOIN villages vil ON ve.village_id = vil.id
         LEFT JOIN users u ON ve.user_id = u.id
         LEFT JOIN clients c ON c.ve_id = ve.id
         LEFT JOIN paiements p ON c.id = p.client_id
+        LEFT JOIN paquets paq ON c.paquet_id = paq.id
         GROUP BY ve.id, vil.nom_village, u.username
       `);
     } else if (["USER", "VE"].includes(req.user.role)) {
