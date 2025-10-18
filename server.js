@@ -5,6 +5,15 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import cors from "cors";
 
+// === Gestion globale des erreurs non gérées ===
+process.on("unhandledRejection", (err) => {
+  console.error("🚨 Promise non gérée:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("💥 Erreur fatale:", err);
+});
+
 dotenv.config();
 const { Pool } = pkg;
 
@@ -12,23 +21,51 @@ const app = express();
 app.use(express.json());
 app.use(cors({ origin: "*" }));
 
-// === DB ===
+// === DB avec reconnexion automatique ===
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: 10, // limite de connexions simultanées
+  idleTimeoutMillis: 30000, // déconnexion après 30s d'inactivité
+  connectionTimeoutMillis: 5000, // timeout connexion initiale
+  keepAlive: true, // maintient la connexion TCP active
 });
 
-// Vérifier la connexion DB
-(async () => {
+// Fonction de test/reconnexion
+async function testDBConnection() {
   try {
     const client = await db.connect();
-    console.log("✅ Connexion PostgreSQL réussie !");
+    console.log("✅ Connexion PostgreSQL active");
     client.release();
   } catch (err) {
-    console.error("❌ Erreur connexion DB:", err.message);
-    process.exit(1);
+    console.error("⚠️ Erreur connexion DB:", err.code || err.message);
+    console.log("🔄 Nouvelle tentative de connexion dans 5 secondes...");
+    setTimeout(testDBConnection, 5000);
   }
-})();
+}
+
+// Démarre le test initial
+testDBConnection();
+
+// Gestion d'erreurs asynchrones du pool
+db.on("error", (err) => {
+  console.error("🚨 Erreur inattendue du pool PostgreSQL:", err.message);
+  console.log("🔁 Tentative de reconnexion automatique...");
+  setTimeout(testDBConnection, 5000);
+});
+
+// Ping périodique pour éviter l'idle timeout Supabase (toutes les 4 minutes)
+setInterval(async () => {
+  try {
+    await db.query("SELECT 1");
+    console.log("💓 Ping DB OK");
+  } catch (err) {
+    console.error("💀 Ping DB échoué:", err.message);
+  }
+}, 4 * 60 * 1000);
+
+// ✅ Export de la connexion DB pour réutilisation
+export { db };
 
 // === AUTHENTIFICATION ===
 function authenticateToken(req, res, next) {
