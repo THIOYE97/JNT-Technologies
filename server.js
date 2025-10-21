@@ -186,19 +186,45 @@ app.get("/ve", authenticateToken, async (req, res) => {
 
     if (req.user.role === "ADMIN") {
       result = await db.query(`
-        SELECT ve.id, ve.ve_code, ve.nom, ve.prenom, 
-               vil.nom_village,
-               u.username AS user_account,
-               COUNT(DISTINCT c.id) AS nb_inscrits,
-               COALESCE(SUM(p.montant), 0) AS total_paiements,
-               COALESCE(SUM(paq.prix_fcfa), 0) AS total_valeur_paquets
-        FROM ve
-        LEFT JOIN villages vil ON ve.village_id = vil.id
-        LEFT JOIN users u ON ve.user_id = u.id
-        LEFT JOIN clients c ON c.ve_id = ve.id
-        LEFT JOIN paiements p ON c.id = p.client_id
-        LEFT JOIN paquets paq ON c.paquet_id = paq.id
-        GROUP BY ve.id, vil.nom_village, u.username
+       SELECT 
+  ve.id,
+  ve.ve_code,
+  ve.nom,
+  ve.prenom,
+  vil.nom_village,
+  u.username AS user_account,
+  COALESCE(c_count.nb_inscrits, 0) AS nb_inscrits,
+  COALESCE(p_sum.total_paiements, 0) AS total_paiements,
+  COALESCE(paq_sum.total_valeur_paquets, 0) AS total_valeur_paquets
+FROM ve
+LEFT JOIN villages vil ON ve.village_id = vil.id
+LEFT JOIN users u ON ve.user_id = u.id
+
+-- 🔹 Sous-requête pour compter les clients
+LEFT JOIN (
+  SELECT ve_id, COUNT(DISTINCT id) AS nb_inscrits
+  FROM clients
+  GROUP BY ve_id
+) AS c_count ON c_count.ve_id = ve.id
+
+-- 🔹 Sous-requête pour la somme des paiements
+LEFT JOIN (
+  SELECT c.ve_id, SUM(p.montant) AS total_paiements
+  FROM paiements p
+  JOIN clients c ON p.client_id = c.id
+  GROUP BY c.ve_id
+) AS p_sum ON p_sum.ve_id = ve.id
+
+-- 🔹 Sous-requête pour la valeur totale des paquets
+LEFT JOIN (
+  SELECT ve_id, SUM(paq.prix_fcfa) AS total_valeur_paquets
+  FROM clients c
+  JOIN paquets paq ON c.paquet_id = paq.id
+  GROUP BY ve_id
+) AS paq_sum ON paq_sum.ve_id = ve.id
+
+ORDER BY ve.nom;
+
       `);
     } else if (["USER", "VE"].includes(req.user.role)) {
       result = await db.query(
