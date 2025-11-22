@@ -595,7 +595,7 @@ app.get("/paquets", authenticateToken, async (req, res) => {
 
 // === ROUTE DE TEST / ===
 app.get("/", (req, res) => {
-  res.send("✅ API Senedjiguiya en ligne !");
+  res.send("✅ API Jamana Nako Technologies en ligne!");
 });
 // === START ===
 const PORT = process.env.PORT || 5000;
